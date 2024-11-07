@@ -18,5 +18,13 @@ langchain_huggingface
 sentence_transformers
 faiss-cpu
 langchain_chroma
-
-
+langchain-ollama
+langchain_groq
+markdown
+pipwin
+Pygments
+SpeechRecognition
+pyaudio
+googletrans==3.1.0a0
+streamlit-lottie
+python-docx
