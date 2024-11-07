@@ -1,10 +1,12 @@
-streamlit
+streamlit==1.40.0
 langchain
 langchain-community
 python-dotenv
+PyPDF2
 pypdf
 langchain-text-splitters
 langchain_groq
+langchain_core
 streamlit-lottie
 youtube-transcript-api 
 beautifulsoup4
