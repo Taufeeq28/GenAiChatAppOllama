@@ -3,7 +3,16 @@ from dotenv import load_dotenv
 import os
 import sys
 from pathlib import Path
-
+from youtube_transcript_api import YouTubeTranscriptApi
+import requests
+from bs4 import BeautifulSoup
+from urllib.parse import urlparse, parse_qs
+import re
+from langchain.chains.summarize import load_summarize_chain
+from langchain.docstore.document import Document
+from langchain_groq import ChatGroq
+from langchain.prompts import PromptTemplate
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 # Add the parent directory to sys.path
 current_dir = Path(__file__).parent.parent
 sys.path.append(str(current_dir))
@@ -23,7 +32,7 @@ GROQ_MODELS = {
         "context_length": 32768,
     },
     "LLaMA2 70B": {
-        "id": "llama2-70b-4096",
+        "id": "llama2-70b", # Fixed model ID
         "description": "Meta's largest model with strong general capabilities",
         "context_length": 4096,
     },
@@ -39,93 +48,277 @@ GROQ_MODELS = {
     }
 }
 
+def get_youtube_id(url):
+    """Extract YouTube video ID from URL"""
+    parsed_url = urlparse(url)
+    if parsed_url.hostname in ['www.youtube.com', 'youtube.com']:
+        if parsed_url.path == '/watch':
+            return parse_qs(parsed_url.query)['v'][0]
+        elif parsed_url.path.startswith(('/embed/', '/v/')):
+            return parsed_url.path.split('/')[2]
+    elif parsed_url.hostname == 'youtu.be':
+        return parsed_url.path[1:]
+    return None
+
+def get_youtube_transcript(video_id):
+    """Get transcript of YouTube video"""
+    try:
+        transcript_list = YouTubeTranscriptApi.get_transcript(video_id)
+        transcript = ' '.join([item['text'] for item in transcript_list])
+        return transcript
+    except Exception as e:
+        st.error(f"Error getting YouTube transcript: {str(e)}")
+        return None
+
+def get_website_content(url):
+    """Extract main content from website"""
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        response = requests.get(url, headers=headers)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # Remove script and style elements
+        for script in soup(["script", "style"]):
+            script.decompose()
+        
+        # Get text content
+        text = soup.get_text()
+        lines = (line.strip() for line in text.splitlines())
+        chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+        text = ' '.join(chunk for chunk in chunks if chunk)
+        
+        return text
+    except Exception as e:
+        st.error(f"Error fetching website content: {str(e)}")
+        return None
+
+
+
+def summarize_text(text, summary_type="concise"):
+    """Summarize the given text"""
+    try:
+        llm = ChatGroq(
+            groq_api_key=st.session_state.groq_api_key,
+            model=st.session_state.selected_model_id
+        )
+        
+        # Create text splitter
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=4000,  # Adjust based on model's context length
+            chunk_overlap=200,
+            length_function=len,
+        )
+        
+        # Split text into chunks
+        texts = text_splitter.split_text(text)
+        
+        # Process each chunk
+        summaries = []
+        for chunk in texts:
+            # Define prompt template for each chunk
+            prompt = PromptTemplate(
+                template="Summarize the following text concisely:\n\n{text}\n\nSummary:",
+                input_variables=["text"]
+            )
+            
+            # Create chain for chunk
+            chain = load_summarize_chain(
+                llm,
+                chain_type="stuff",
+                prompt=prompt
+            )
+            
+            # Process chunk
+            doc = [Document(page_content=chunk)]
+            chunk_summary = chain.run(doc)
+            summaries.append(chunk_summary)
+        
+        # Combine chunk summaries
+        if len(summaries) > 1:
+            # Create final summary from all chunks
+            final_text = " ".join(summaries)
+            prompt = PromptTemplate(
+                template="""Combine and create a final {summary_type} summary of the following summaries:
+                \n\n{text}\n\nFinal Summary:""",
+                input_variables=["text", "summary_type"]
+            )
+            
+            chain = load_summarize_chain(
+                llm,
+                chain_type="stuff",
+                prompt=prompt
+            )
+            
+            final_doc = [Document(page_content=final_text)]
+            return chain.run({
+                "input_documents": final_doc,
+                "text": final_text,
+                "summary_type": summary_type
+            })
+        else:
+            return summaries[0]
+    
+    except Exception as e:
+        st.error(f"Error in summarization: {str(e)}")
+        return None
 def show_chat_interface():
-    # Custom CSS for chat interface
+    # Define language options
+    language_options = {
+        "🇺🇸 English": "English",
+        "🇮🇳 Hindi": "Hindi",
+        "🇪🇸 Spanish": "Spanish",
+        "🇫🇷 French": "French",
+        "🇩🇪 German": "German"
+    }
+
+    # Custom CSS for enhanced UI
     st.markdown("""
         <style>
-        .chat-container {
-            background-color: #1E2129;
-            border-radius: 10px;
-            padding: 20px;
-            margin: 10px 0;
+        /* Reset background colors */
+        .sidebar .block-container {
+            padding: 2rem 1rem;
+            background-color: transparent !important;
         }
-        .user-message {
-            background-color: #FF4B4B;
+        
+        /* Remove dark backgrounds from sections */
+        .sidebar .element-container {
+            background-color: transparent !important;
+            margin-bottom: 1rem;
+        }
+        
+        /* Style section headers */
+        .section-header {
+            color: #FFFFFF;
+            font-size: 1.2rem;
+            margin: 1.5rem 0 1rem 0;
+            padding: 0;
+            background: transparent;
+        }
+        
+        /* Style input fields */
+        .stTextInput > div > div > input {
+            background-color: #2E3440 !important;
             color: white;
-            padding: 10px 15px;
-            border-radius: 20px;
-            margin: 5px 0;
-            max-width: 70%;
-            float: right;
+            border: 1px solid #4C566A;
+            border-radius: 8px;
         }
-        .assistant-message {
-            background-color: #2E3440;
+        
+        /* Style selectboxes */
+        .stSelectbox > div > div {
+            background-color: #2E3440 !important;
             color: white;
-            padding: 10px 15px;
-            border-radius: 20px;
-            margin: 5px 0;
-            max-width: 70%;
-            float: left;
+            border: 1px solid #4C566A;
+            border-radius: 8px;
         }
-        .sidebar .stButton>button {
-            width: 100%;
-            margin: 5px 0;
+        
+        /* Style expander */
+        .streamlit-expanderHeader {
+            background-color: #2E3440 !important;
+            border: 1px solid #4C566A;
+            border-radius: 8px;
+            color: white;
+        }
+        
+        /* Style file uploader */
+        .stFileUploader > div {
+            background-color: #2E3440 !important;
+            border: 2px dashed #4C566A;
+            border-radius: 8px;
+            padding: 1rem;
+        }
+        
+        /* Style buttons */
+        .stButton > button {
+            background-color: #4C566A;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 0.5rem 1rem;
+            transition: all 0.3s ease;
+        }
+        
+        .stButton > button:hover {
+            background-color: #5E81AC;
+            transform: translateY(-1px);
+        }
+        
+        /* Remove any unwanted backgrounds */
+        div[data-testid="stSidebarNav"] {
+            background-color: transparent !important;
+        }
+        
+        .sidebar-content {
+            background-color: transparent !important;
+        }
+        
+        /* Main background color for sidebar */
+        section[data-testid="stSidebar"] {
+            background-color: #1E2129 !important;
         }
         </style>
     """, unsafe_allow_html=True)
 
     # Sidebar
     with st.sidebar:
-        st.title("🤖 Chat Settings")  # Using emoji instead of logo
+        # Header
+        st.markdown("""
+            <div class="sidebar-header">
+                <h1 style='color: white; font-size: 1.8rem; margin-bottom: 0.5rem;'>🤖 AI Chat Assistant</h1>
+                <p style='color: #9E9E9E; font-size: 0.9rem;'>Powered by GROQ</p>
+            </div>
+        """, unsafe_allow_html=True)
         
-        # API Key input
+        # API Configuration
+        st.markdown('<div class="section-header">🔑 API Configuration</div>', unsafe_allow_html=True)
         st.session_state.groq_api_key = st.text_input(
             "GROQ API Key",
             type="password",
             help="Get your API key from console.groq.com",
-            placeholder="Enter your API key..."
+            placeholder="Enter your API key...",
+            label_visibility="collapsed"
         )
-                # Add Model selector before language selector
-        st.markdown("### 🧠 Model Selection")
+        
+        # Model Selection
+        st.markdown('<div class="section-header">🧠 Model Selection</div>', unsafe_allow_html=True)
         selected_model = st.selectbox(
             "Choose a Model",
             options=list(GROQ_MODELS.keys()),
             index=0,
+            label_visibility="collapsed"
         )
         
-        # Show model details
-        with st.expander("Model Details", expanded=False):
+        # Model Details
+        with st.expander("ℹ️ Model Details", expanded=False):
             model_info = GROQ_MODELS[selected_model]
             st.markdown(f"""
-                **Model ID:** `{model_info['id']}`\n
-                **Description:** {model_info['description']}\n
-                **Context Length:** {model_info['context_length']} tokens
-            """)
+                <div style='padding: 1rem; border-radius: 8px;'>
+                    <p><strong>Model ID:</strong> <code>{model_info['id']}</code></p>
+                    <p><strong>Description:</strong> {model_info['description']}</p>
+                    <p><strong>Context Length:</strong> {model_info['context_length']} tokens</p>
+                </div>
+            """, unsafe_allow_html=True)
         
-        # Store selected model ID in session state
-        st.session_state.selected_model_id = GROQ_MODELS[selected_model]['id']
-        # Language selector
-        language_options = {
-            "🇺🇸 English": "English",
-            "🇮🇳 Hindi": "Hindi",
-            "🇪🇸 Spanish": "Spanish",
-            "🇫🇷 French": "French",
-            "🇩🇪 German": "German"
-        }
+        # Language Selection
+        st.markdown('<div class="section-header">🌐 Language</div>', unsafe_allow_html=True)
         selected_lang = st.selectbox(
             "Select Language",
-            options=list(language_options.keys())
+            options=list(language_options.keys()),
+            label_visibility="collapsed"
         )
         language = language_options[selected_lang]
         
-        # PDF uploader
-        st.markdown("### 📄 Upload Documents")
+        # Document Upload
+        st.markdown('<div class="section-header">📄 Upload Documents</div>', unsafe_allow_html=True)
         pdf_docs = st.file_uploader(
             "Drag and drop your PDFs here",
             accept_multiple_files=True,
-            type="pdf"
+            type="pdf",
+            label_visibility="collapsed"
         )
         
+        # Action Buttons
         col1, col2 = st.columns(2)
         with col1:
             if st.button("🔄 Process", use_container_width=True):
@@ -148,6 +341,99 @@ def show_chat_interface():
                 st.session_state.chat_history = []
                 st.session_state.vectorstore = None
                 st.rerun()
+
+        # URL Summarization
+        with st.expander("🔗 Summarize URL Content", expanded=False):
+            url_input = st.text_input(
+                "Enter YouTube URL or website URL",
+                placeholder="https://..."
+            )
+            
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                content_type = st.radio(
+                    "Content Type",
+                    ["YouTube Video", "Website"],
+                    horizontal=True
+                )
+                
+            with col2:
+                summary_type = st.selectbox(
+                    "Summary Type",
+                    ["concise", "detailed", "bullet_points"],
+                    help="Choose the type of summary"
+                )
+            
+            if st.button("📝 Generate Summary", use_container_width=True):
+                if not st.session_state.groq_api_key:
+                    st.error("⚠️ Please enter your GROQ API key first.")
+                elif not url_input:
+                    st.warning("⚠️ Please enter a URL.")
+                else:
+                    with st.spinner("Processing content..."):
+                        try:
+                            if content_type == "YouTube Video":
+                                video_id = get_youtube_id(url_input)
+                                if not video_id:
+                                    st.error("Invalid YouTube URL")
+                                    return
+                                
+                                transcript = get_youtube_transcript(video_id)
+                                if not transcript:
+                                    st.error("Could not get video transcript")
+                                    return
+                                
+                                summary = summarize_text(transcript, "video")
+                                if summary:
+                                    st.markdown("### Video Summary")
+                                    st.markdown(summary)
+                                    
+                                    # Add to chat history
+                                    st.session_state.messages.append({
+                                        "role": "user",
+                                        "content": f"Please summarize this YouTube video: {url_input}"
+                                    })
+                                    st.session_state.messages.append({
+                                        "role": "assistant",
+                                        "content": f"Here's a summary of the video:\n\n{summary}"
+                                    })
+                                    st.rerun()
+                            
+                            else:  # Website
+                                content = get_website_content(url_input)
+                                if not content:
+                                    st.error("Could not fetch website content")
+                                    return
+                                
+                                summary = summarize_text(content, "article")
+                                if summary:
+                                    st.markdown("### Article Summary")
+                                    st.markdown(summary)
+                                    
+                                    # Add to chat history
+                                    st.session_state.messages.append({
+                                        "role": "user",
+                                        "content": f"Please summarize this article: {url_input}"
+                                    })
+                                    st.session_state.messages.append({
+                                        "role": "assistant",
+                                        "content": f"Here's a summary of the article:\n\n{summary}"
+                                    })
+                                    st.rerun()
+                        
+                        except Exception as e:
+                            st.error(f"Error processing URL: {str(e)}")
+        
+        # Footer
+        st.markdown("""
+            <div class="sidebar-footer">
+                <p style='color: #9E9E9E; font-size: 0.8rem; margin: 0;'>by Taufeeq</p>
+            </div>
+        """, unsafe_allow_html=True)
+
+    # Store selected model ID in session state
+    st.session_state.selected_model_id = GROQ_MODELS[selected_model]['id']
 
     # Main chat interface
     st.title("💬 Chat Interface")
