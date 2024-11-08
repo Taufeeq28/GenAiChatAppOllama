@@ -90,20 +90,22 @@ GenAiChatAppOllama/
 └── README.md
 ```
 ## Dependencies 📦
-•	- streamlit==1.40.0
-•	- langchain
-•	- langchain-community
-•	- python-dotenv
-•	- PyPDF2
-•	- pypdf
-•	- langchain-text-splitters
-•	- langchain_groq
-•	- langchain_core
-•	- streamlit-lottie
-•	- youtube-transcript-api
-•	- beautifulsoup4
-•	- requests
-•	- python-docx
+
+- `streamlit==1.40.0`
+- `langchain`
+- `langchain-community`
+- `python-dotenv`
+- `PyPDF2`
+- `pypdf`
+- `langchain-text-splitters`
+- `langchain_groq`
+- `langchain_core`
+- `streamlit-lottie`
+- `youtube-transcript-api`
+- `beautifulsoup4`
+- `requests`
+- `python-docx`
+
 ## Configuration ⚙️
 The application uses several AI models from GROQ:
 - Mixtral 8x7B (Default)
