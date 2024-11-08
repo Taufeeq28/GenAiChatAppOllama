@@ -12,7 +12,7 @@ from langchain.chains.summarize import load_summarize_chain
 from langchain.docstore.document import Document
 from langchain_groq import ChatGroq
 from langchain.prompts import PromptTemplate
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+
 # Add the parent directory to sys.path
 current_dir = Path(__file__).parent.parent
 sys.path.append(str(current_dir))
@@ -25,6 +25,10 @@ from utils.chat_utils import (
     get_conversation_chain,
     initialize_chain
 )
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+if not GROQ_API_KEY:
+    raise ValueError("GROQ_API_KEY not found in environment variables")
+
 GROQ_MODELS = {
     "Mixtral 8x7B": {
         "id": "mixtral-8x7b-32768",
@@ -164,6 +168,8 @@ def summarize_text(text, summary_type="concise"):
         st.error(f"Error in summarization: {str(e)}")
         return None
 def show_chat_interface():
+    st.session_state.groq_api_key = GROQ_API_KEY
+
     # Define language options
     language_options = {
         "🇺🇸 English": "English",
@@ -270,15 +276,15 @@ def show_chat_interface():
             </div>
         """, unsafe_allow_html=True)
         
-        # API Configuration
-        st.markdown('<div class="section-header">🔑 API Configuration</div>', unsafe_allow_html=True)
-        st.session_state.groq_api_key = st.text_input(
-            "GROQ API Key",
-            type="password",
-            help="Get your API key from console.groq.com",
-            placeholder="Enter your API key...",
-            label_visibility="collapsed"
-        )
+        # # API Configuration
+        # st.markdown('<div class="section-header">🔑 API Configuration</div>', unsafe_allow_html=True)
+        # st.session_state.groq_api_key = st.text_input(
+        #     "GROQ API Key",
+        #     type="password",
+        #     help="Get your API key from console.groq.com",
+        #     placeholder="Enter your API key...",
+        #     label_visibility="collapsed"
+        # )
         
         # Model Selection
         st.markdown('<div class="section-header">🧠 Model Selection</div>', unsafe_allow_html=True)

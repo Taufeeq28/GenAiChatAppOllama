@@ -11,3 +11,5 @@ streamlit-lottie
 youtube-transcript-api 
 beautifulsoup4
 requests
+python-docx
+tempfile
