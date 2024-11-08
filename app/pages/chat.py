@@ -12,6 +12,7 @@ from langchain.chains.summarize import load_summarize_chain
 from langchain.docstore.document import Document
 from langchain_groq import ChatGroq
 from langchain.prompts import PromptTemplate
+from langchain_text_splitters import RecursiveCharacterTextSplitter  # Updated import
 
 # Add the parent directory to sys.path
 current_dir = Path(__file__).parent.parent
@@ -136,8 +137,11 @@ def summarize_text(text, summary_type="concise"):
             
             # Process chunk
             doc = [Document(page_content=chunk)]
-            chunk_summary = chain.run(doc)
-            summaries.append(chunk_summary)
+            chunk_summary = chain.invoke({
+                "input_documents": doc,
+                "text": chunk
+            })
+            summaries.append(chunk_summary["output_text"])
         
         # Combine chunk summaries
         if len(summaries) > 1:
@@ -156,17 +160,19 @@ def summarize_text(text, summary_type="concise"):
             )
             
             final_doc = [Document(page_content=final_text)]
-            return chain.run({
+            final_summary = chain.invoke({
                 "input_documents": final_doc,
                 "text": final_text,
                 "summary_type": summary_type
             })
+            return final_summary["output_text"]
         else:
             return summaries[0]
     
     except Exception as e:
         st.error(f"Error in summarization: {str(e)}")
         return None
+
 def show_chat_interface():
     st.session_state.groq_api_key = GROQ_API_KEY
 
