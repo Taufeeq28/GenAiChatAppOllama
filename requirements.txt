@@ -8,8 +8,7 @@ langchain-text-splitters
 langchain_groq
 langchain_core
 streamlit-lottie
-youtube-transcript-api 
+youtube-transcript-api
 beautifulsoup4
 requests
 python-docx
-tempfile
